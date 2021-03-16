@@ -1,0 +1,52 @@
+replicas: ${current_deployment.replica_count}
+containerPort: 4000
+
+stockx:
+  team: ""
+
+service_name: harness-poc
+
+labels:
+  app: '{{ .Chart.Name }}'
+  release: '{{ .Release.Name }}'
+  type: producer
+
+image: ${artifact.metadata.image}
+
+ingress:
+  enabled: true
+  domainName:
+
+hpa:
+  enabled:
+  cpuPercentage: 65
+  maxReplicas: 10
+
+pdb:
+  enabled:
+  maxUnavailable: 1
+
+compute_resources:
+  cpu: 200m
+  memory: 700Mi
+
+health_probes:
+  probes:
+    readinessProbe:
+      httpGet:
+        path: /api/v1/status
+        port: http
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      failureThreshold: 3
+
+vault:
+  secrets:
+  - name: harness-poc # Secret name, mount name defaults to application name
+    type: env
+  shared_secrets: {}
+
+envConfig:
+  EXPOSE_ERRORS:
+  LOG_LEVEL:
+  NODE_ENV:

@@ -1,0 +1,23 @@
+replicas: 2
+
+ingress:
+  domainName: harness-poc.dev1.stockx.net
+
+hpa:
+  enabled: false
+
+pdb:
+  enabled: false
+
+compute_resources:
+  enabled: true
+
+vault:
+  enabled: true
+  address: "https://vault.service.dev-sandbox-redux.stockx.io:8200"
+
+envConfig:
+  LOG_LEVEL: debug
+  ENVIRONMENT: "dev1"
+  NODE_ENV: development
+  EXPOSE_ERRORS: "true"

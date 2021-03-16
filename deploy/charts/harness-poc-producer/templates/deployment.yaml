@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+{{- include "default.labels" . | indent 4 }}
+  annotations:
+    checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+{{- include "default.annotations" . | indent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+{{- include "default.labels" . | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{- include "default.labels" . | indent 8 }}
+      annotations:
+      {{- include "default.annotations" . | indent 8 }}
+      {{- if .Values.vault.enabled }}
+      {{- include "vault.annotations" . | indent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ .Values.service_name }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: "failure-domain.beta.kubernetes.io/zone"
+              labelSelector:
+                matchExpressions:
+                {{- range $key, $val := $.Values.labels }}
+                - key: {{ $key }}
+                  operator: In
+                  values:
+                  - {{ tpl $val $ }}
+                {{- end }}
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: "kubernetes.io/hostname"
+              labelSelector:
+                matchExpressions:
+                {{- range $key, $val := $.Values.labels }}
+                - key: {{ $key }}
+                  operator: In
+                  values:
+                  - {{ tpl $val $ }}
+                {{- end }}
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "1"
+        - name: edns0
+        - name: single-request-reopen
+      imagePullSecrets:
+        - name: quay
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DD_SERVICE_NAME
+              value: {{ .Chart.Name }}
+
+            # NOTE: if you have multiple deployments, make sure to append something
+            # after the {{ .Release.Name }} (e.g., {{ .Release.Name }}-consumer),
+            # otherwise, it will default to the service name (e.g., harness-poc).
+            #
+            # The 'X' just indicates that this is a StockX custom tag, not an environment
+            # variable that DataDog looks for. Please, use this standard for additional tags.
+            - name: DDX_DEPLOYMENT_TAG
+              value: {{ .Release.Name }}
+
+            - name: DD_AGENT_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: DD_TRACE_ANALYTICS_ENABLED
+              value: "true"
+            - name: DD_RUNTIME_METRICS_ENABLED
+              value: "true"
+            - name: DD_LOGS_INJECTION
+              value: "true"
+            - name: DD_TRACE_AGENT_PORT
+              value: "8126"
+            - name: DD_DOGSTATSD_PORT
+              value: "8125"
+            - name: DD_ENTITY_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          envFrom:
+            - configMapRef:
+                name: "{{ .Release.Name }}-env"
+          ports:
+            - containerPort: {{ .Values.containerPort }}
+              protocol: TCP
+              name: http
+{{ toYaml .Values.health_probes.probes | indent 10 }}
+          resources:
+            requests:
+              cpu: {{ .Values.compute_resources.cpu }}
+              memory: {{ .Values.compute_resources.memory }}
+            limits:
+              cpu: {{ .Values.compute_resources.cpu }}
+              memory: {{ .Values.compute_resources.memory }}

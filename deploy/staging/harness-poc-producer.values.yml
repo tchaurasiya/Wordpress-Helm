@@ -1,0 +1,23 @@
+replicas: 2
+
+ingress:
+  domainName: harness-poc.staging.stockx.net
+
+hpa:
+  enabled: true
+
+pdb:
+  enabled: false
+
+compute_resources:
+  enabled: false
+
+vault:
+  enabled: true
+  address: "https://vault.service.arryn-staging-redux.stockx.io:8200"
+
+envConfig:
+  LOG_LEVEL: debug
+  ENVIRONMENT: "staging"
+  NODE_ENV: production
+  EXPOSE_ERRORS: "true"

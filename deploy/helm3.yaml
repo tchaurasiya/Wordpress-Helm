@@ -1,0 +1,706 @@
+---
+# Source: harness-poc/templates/serviceaccount.yaml
+# harness.io/skip-file-for-deploy
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: harness-poc
+  labels:    
+    app: harness-poc
+    release: RELEASE-NAME
+    type: producer
+  annotations:    
+    stockx.io/helm-chart-name: 'harness-poc'
+    stockx.io/helm-release: 'RELEASE-NAME'
+    stockx.io/helm-revision: '1'
+    stockx.io/team: ''
+---
+# Source: harness-poc/charts/redis/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: RELEASE-NAME-redis
+  labels:
+    app: redis
+    chart: redis-10.5.7
+    release: "RELEASE-NAME"
+    heritage: "Helm"
+type: Opaque
+data:
+  redis-password: "bGhwUUtBQlZyMA=="
+---
+# Source: harness-poc/charts/redis/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: RELEASE-NAME-redis
+  labels:
+    app: redis
+    chart: redis-10.5.7
+    heritage: Helm
+    release: RELEASE-NAME
+data:
+  redis.conf: |-
+    # User-supplied configuration:
+    # Enable AOF https://redis.io/topics/persistence#append-only-file
+    appendonly yes
+    # Disable RDB persistence, AOF persistence already enabled.
+    save ""
+  master.conf: |-
+    dir /data
+    rename-command FLUSHDB ""
+    rename-command FLUSHALL ""
+  replica.conf: |-
+    dir /data
+    slave-read-only yes
+    rename-command FLUSHDB ""
+    rename-command FLUSHALL ""
+---
+# Source: harness-poc/charts/redis/templates/health-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: RELEASE-NAME-redis-health
+  labels:
+    app: redis
+    chart: redis-10.5.7
+    heritage: Helm
+    release: RELEASE-NAME
+data:
+  ping_readiness_local.sh: |-
+    response=$(
+      timeout -s 9 $1 \
+      redis-cli \
+        -a $REDIS_PASSWORD --no-auth-warning \
+        -h localhost \
+        -p $REDIS_PORT \
+        ping
+    )
+    if [ "$response" != "PONG" ]; then
+      echo "$response"
+      exit 1
+    fi
+  ping_liveness_local.sh: |-
+    response=$(
+      timeout -s 9 $1 \
+      redis-cli \
+        -a $REDIS_PASSWORD --no-auth-warning \
+        -h localhost \
+        -p $REDIS_PORT \
+        ping
+    )
+    if [ "$response" != "PONG" ] && [ "$response" != "LOADING Redis is loading the dataset in memory" ]; then
+      echo "$response"
+      exit 1
+    fi
+  ping_readiness_master.sh: |-
+    response=$(
+      timeout -s 9 $1 \
+      redis-cli \
+        -a $REDIS_MASTER_PASSWORD --no-auth-warning \
+        -h $REDIS_MASTER_HOST \
+        -p $REDIS_MASTER_PORT_NUMBER \
+        ping
+    )
+    if [ "$response" != "PONG" ]; then
+      echo "$response"
+      exit 1
+    fi
+  ping_liveness_master.sh: |-
+    response=$(
+      timeout -s 9 $1 \
+      redis-cli \
+        -a $REDIS_MASTER_PASSWORD --no-auth-warning \
+        -h $REDIS_MASTER_HOST \
+        -p $REDIS_MASTER_PORT_NUMBER \
+        ping
+    )
+    if [ "$response" != "PONG" ] && [ "$response" != "LOADING Redis is loading the dataset in memory" ]; then
+      echo "$response"
+      exit 1
+    fi
+  ping_readiness_local_and_master.sh: |-
+    script_dir="$(dirname "$0")"
+    exit_status=0
+    "$script_dir/ping_readiness_local.sh" $1 || exit_status=$?
+    "$script_dir/ping_readiness_master.sh" $1 || exit_status=$?
+    exit $exit_status
+  ping_liveness_local_and_master.sh: |-
+    script_dir="$(dirname "$0")"
+    exit_status=0
+    "$script_dir/ping_liveness_local.sh" $1 || exit_status=$?
+    "$script_dir/ping_liveness_master.sh" $1 || exit_status=$?
+    exit $exit_status
+---
+# Source: harness-poc/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "RELEASE-NAME-env"
+  labels:    
+    app: harness-poc
+    release: RELEASE-NAME
+    type: producer
+  annotations:    
+    stockx.io/helm-chart-name: 'harness-poc'
+    stockx.io/helm-release: 'RELEASE-NAME'
+    stockx.io/helm-revision: '1'
+    stockx.io/team: ''
+data:
+  ENVIRONMENT: dev1
+  EXPOSE_ERRORS: "true"
+  LOG_LEVEL: debug
+  NODE_ENV: development
+---
+# Source: harness-poc/charts/redis/templates/headless-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: RELEASE-NAME-redis-headless
+  labels:
+    app: redis
+    chart: redis-10.5.7
+    release: RELEASE-NAME
+    heritage: Helm
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: redis
+  selector:
+    app: redis
+    release: RELEASE-NAME
+---
+# Source: harness-poc/charts/redis/templates/redis-master-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: RELEASE-NAME-redis-master
+  labels:
+    app: redis
+    chart: redis-10.5.7
+    release: RELEASE-NAME
+    heritage: Helm
+spec:
+  type: ClusterIP
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: redis
+  selector:
+    app: redis
+    release: RELEASE-NAME
+    role: master
+---
+# Source: harness-poc/charts/redis/templates/redis-slave-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: RELEASE-NAME-redis-slave
+  labels:
+    app: redis
+    chart: redis-10.5.7
+    release: RELEASE-NAME
+    heritage: Helm
+spec:
+  type: ClusterIP
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: redis
+  selector:
+    app: redis
+    release: RELEASE-NAME
+    role: slave
+---
+# Source: harness-poc/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: RELEASE-NAME
+  labels:    
+    app: harness-poc
+    release: RELEASE-NAME
+    type: producer
+  annotations:    
+    stockx.io/helm-chart-name: 'harness-poc'
+    stockx.io/helm-release: 'RELEASE-NAME'
+    stockx.io/helm-revision: '1'
+    stockx.io/team: ''
+spec:
+  type: ClusterIP
+  selector:    
+    app: harness-poc
+    release: RELEASE-NAME
+    type: producer
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: http
+---
+# Source: harness-poc/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: RELEASE-NAME
+  labels:    
+    app: harness-poc
+    release: RELEASE-NAME
+    type: producer
+  annotations:
+    checksum/config: dd0d7c00cf6c3ee0b2ec19c90fd7441333edd4f2395ffce327df9255d81ff945    
+    stockx.io/helm-chart-name: 'harness-poc'
+    stockx.io/helm-release: 'RELEASE-NAME'
+    stockx.io/helm-revision: '1'
+    stockx.io/team: ''
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+  selector:
+    matchLabels:      
+      app: harness-poc
+      release: RELEASE-NAME
+      type: producer
+  template:
+    metadata:
+      labels:        
+        app: harness-poc
+        release: RELEASE-NAME
+        type: producer
+      annotations:        
+        stockx.io/helm-chart-name: 'harness-poc'
+        stockx.io/helm-release: 'RELEASE-NAME'
+        stockx.io/helm-revision: '1'
+        stockx.io/team: ''        
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/agent-pre-populate-only: "true"
+        vault.hashicorp.com/role: 'default-harness-poc'
+        
+          
+        vault.hashicorp.com/agent-inject-secret-env-harness-poc: 'secret/default/harness-poc/data/harness-poc'
+        vault.hashicorp.com/agent-inject-template-env-harness-poc: |-
+          {{ with secret "secret/default/harness-poc/data/harness-poc" }}
+            {{ range $k, $v := .Data.data }}
+              {{ $k }}={{ $v }}
+            {{ end }}{{ end }}
+          
+        
+        
+        vault.hashicorp.com/service: 'https://vault.service.dev-sandbox-redux.stockx.io:8200'
+    spec:
+      serviceAccountName: harness-poc
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: "failure-domain.beta.kubernetes.io/zone"
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - harness-poc
+                - key: release
+                  operator: In
+                  values:
+                  - RELEASE-NAME
+                - key: type
+                  operator: In
+                  values:
+                  - producer
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: "kubernetes.io/hostname"
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - harness-poc
+                - key: release
+                  operator: In
+                  values:
+                  - RELEASE-NAME
+                - key: type
+                  operator: In
+                  values:
+                  - producer
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "1"
+        - name: edns0
+        - name: single-request-reopen
+      imagePullSecrets:
+        - name: quay
+      containers:
+        - name: harness-poc
+          image: "${artifact.metadata.image}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DD_SERVICE_NAME
+              value: harness-poc
+
+            # NOTE: if you have multiple deployments, make sure to append something
+            # after the RELEASE-NAME (e.g., RELEASE-NAME-consumer),
+            # otherwise, it will default to the service name (e.g., harness-poc).
+            #
+            # The 'X' just indicates that this is a StockX custom tag, not an environment
+            # variable that DataDog looks for. Please, use this standard for additional tags.
+            - name: DDX_DEPLOYMENT_TAG
+              value: RELEASE-NAME
+
+            - name: DD_AGENT_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: DD_TRACE_ANALYTICS_ENABLED
+              value: "true"
+            - name: DD_RUNTIME_METRICS_ENABLED
+              value: "true"
+            - name: DD_LOGS_INJECTION
+              value: "true"
+            - name: DD_TRACE_AGENT_PORT
+              value: "8126"
+            - name: DD_DOGSTATSD_PORT
+              value: "8125"
+            - name: DD_ENTITY_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          envFrom:
+            - configMapRef:
+                name: "RELEASE-NAME-env"
+          ports:
+            - containerPort: 4000
+              protocol: TCP
+              name: http
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /api/v1/status
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 200m
+              memory: 700Mi
+            limits:
+              cpu: 200m
+              memory: 700Mi
+---
+# Source: harness-poc/charts/redis/templates/redis-master-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: RELEASE-NAME-redis-master
+  labels:
+    app: redis
+    chart: redis-10.5.7
+    release: RELEASE-NAME
+    heritage: Helm
+spec:
+  selector:
+    matchLabels:
+      app: redis
+      release: RELEASE-NAME
+      role: master
+  serviceName: RELEASE-NAME-redis-headless
+  template:
+    metadata:
+      labels:
+        app: redis
+        chart: redis-10.5.7
+        release: RELEASE-NAME
+        role: master
+      annotations:
+        checksum/health: 6ef95f5223cae7bfc15007d8fecfbea5fecd9288be812e093f2d5da56ee66ef6
+        checksum/configmap: 9c664055f824de0a51e1f51b9b3a15d6835bbf6f3d35d18958aa0f0b075d81a2
+        checksum/secret: 0289a0f62f6a140b00a257ae76756ae8171bc6aa7c7c1b651032aadb7e460695
+    spec:      
+      securityContext:
+        fsGroup: 1001
+      serviceAccountName: "default"
+      containers:
+      - name: RELEASE-NAME-redis
+        image: "docker.io/bitnami/redis:5.0.7-debian-10-r32"
+        imagePullPolicy: "IfNotPresent"
+        securityContext:
+          runAsUser: 1001
+        command:
+        - /bin/bash
+        - -c
+        - |
+          if [[ -n $REDIS_PASSWORD_FILE ]]; then
+            password_aux=`cat ${REDIS_PASSWORD_FILE}`
+            export REDIS_PASSWORD=$password_aux
+          fi
+          if [[ ! -f /opt/bitnami/redis/etc/master.conf ]];then
+            cp /opt/bitnami/redis/mounted-etc/master.conf /opt/bitnami/redis/etc/master.conf
+          fi
+          if [[ ! -f /opt/bitnami/redis/etc/redis.conf ]];then
+            cp /opt/bitnami/redis/mounted-etc/redis.conf /opt/bitnami/redis/etc/redis.conf
+          fi
+          ARGS=("--port" "${REDIS_PORT}")
+          ARGS+=("--requirepass" "${REDIS_PASSWORD}")
+          ARGS+=("--masterauth" "${REDIS_PASSWORD}")
+          ARGS+=("--include" "/opt/bitnami/redis/etc/redis.conf")
+          ARGS+=("--include" "/opt/bitnami/redis/etc/master.conf")
+          /run.sh ${ARGS[@]}
+        env:
+        - name: REDIS_REPLICATION_MODE
+          value: master
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: RELEASE-NAME-redis
+              key: redis-password
+        - name: REDIS_PORT
+          value: "6379"
+        ports:
+        - name: redis
+          containerPort: 6379
+        livenessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 5
+          exec:
+            command:
+            - sh
+            - -c
+            - /health/ping_liveness_local.sh 5
+        readinessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 5
+          exec:
+            command:
+            - sh
+            - -c
+            - /health/ping_readiness_local.sh 5
+        resources:
+          null
+        volumeMounts:
+        - name: health
+          mountPath: /health
+        - name: redis-data
+          mountPath: /data
+          subPath: 
+        - name: config
+          mountPath: /opt/bitnami/redis/mounted-etc
+        - name: redis-tmp-conf
+          mountPath: /opt/bitnami/redis/etc/
+      volumes:
+      - name: health
+        configMap:
+          name: RELEASE-NAME-redis-health
+          defaultMode: 0755
+      - name: config
+        configMap:
+          name: RELEASE-NAME-redis
+      - name: redis-tmp-conf
+        emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+        labels:
+          app: redis
+          release: RELEASE-NAME
+          heritage: Helm
+          component: master
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: "8Gi"
+        
+        selector:
+  updateStrategy:
+    type: RollingUpdate
+---
+# Source: harness-poc/charts/redis/templates/redis-slave-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: RELEASE-NAME-redis-slave
+  labels:
+    app: redis
+    chart: redis-10.5.7
+    release: RELEASE-NAME
+    heritage: Helm
+spec:
+  replicas: 2
+  serviceName: RELEASE-NAME-redis-headless
+  selector:
+    matchLabels:
+      app: redis
+      release: RELEASE-NAME
+      role: slave
+  template:
+    metadata:
+      labels:
+        app: redis
+        release: RELEASE-NAME
+        chart: redis-10.5.7
+        role: slave
+      annotations:
+        checksum/health: 6ef95f5223cae7bfc15007d8fecfbea5fecd9288be812e093f2d5da56ee66ef6
+        checksum/configmap: 9c664055f824de0a51e1f51b9b3a15d6835bbf6f3d35d18958aa0f0b075d81a2
+        checksum/secret: 644bceea4b39a2952865ac72cfde7b783287a7c59299ec074a6a935c3dad5114
+    spec:      
+      securityContext:
+        fsGroup: 1001
+      serviceAccountName: "default"
+      containers:
+      - name: RELEASE-NAME-redis
+        image: docker.io/bitnami/redis:5.0.7-debian-10-r32
+        imagePullPolicy: "IfNotPresent"
+        securityContext:
+          runAsUser: 1001
+        command:
+        - /bin/bash
+        - -c
+        - |
+          if [[ -n $REDIS_PASSWORD_FILE ]]; then
+            password_aux=`cat ${REDIS_PASSWORD_FILE}`
+            export REDIS_PASSWORD=$password_aux
+          fi
+          if [[ -n $REDIS_MASTER_PASSWORD_FILE ]]; then
+            password_aux=`cat ${REDIS_MASTER_PASSWORD_FILE}`
+            export REDIS_MASTER_PASSWORD=$password_aux
+          fi
+          if [[ ! -f /opt/bitnami/redis/etc/replica.conf ]];then
+            cp /opt/bitnami/redis/mounted-etc/replica.conf /opt/bitnami/redis/etc/replica.conf
+          fi
+          if [[ ! -f /opt/bitnami/redis/etc/redis.conf ]];then
+            cp /opt/bitnami/redis/mounted-etc/redis.conf /opt/bitnami/redis/etc/redis.conf
+          fi
+          ARGS=("--port" "${REDIS_PORT}")
+          ARGS+=("--slaveof" "${REDIS_MASTER_HOST}" "${REDIS_MASTER_PORT_NUMBER}")
+          ARGS+=("--requirepass" "${REDIS_PASSWORD}")
+          ARGS+=("--masterauth" "${REDIS_MASTER_PASSWORD}")
+          ARGS+=("--include" "/opt/bitnami/redis/etc/redis.conf")
+          ARGS+=("--include" "/opt/bitnami/redis/etc/replica.conf")
+          /run.sh "${ARGS[@]}"
+        env:
+        - name: REDIS_REPLICATION_MODE
+          value: slave
+        - name: REDIS_MASTER_HOST
+          value: RELEASE-NAME-redis-master-0.RELEASE-NAME-redis-headless.default.svc.cluster.local
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_MASTER_PORT_NUMBER
+          value: "6379"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: RELEASE-NAME-redis
+              key: redis-password
+        - name: REDIS_MASTER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: RELEASE-NAME-redis
+              key: redis-password
+        ports:
+        - name: redis
+          containerPort: 6379
+        livenessProbe:
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 5
+          exec:
+            command:
+            - sh
+            - -c
+            - /health/ping_liveness_local_and_master.sh 5
+        readinessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 5
+          exec:
+            command:
+            - sh
+            - -c
+            - /health/ping_readiness_local_and_master.sh 5
+        resources:
+          null
+        volumeMounts:
+        - name: health
+          mountPath: /health
+        - name: redis-data
+          mountPath: /data
+        - name: config
+          mountPath: /opt/bitnami/redis/mounted-etc
+        - name: redis-tmp-conf
+          mountPath: /opt/bitnami/redis/etc
+      volumes:
+      - name: health
+        configMap:
+          name: RELEASE-NAME-redis-health
+          defaultMode: 0755
+      - name: config
+        configMap:
+          name: RELEASE-NAME-redis
+      - name: sentinel-tmp-conf
+        emptyDir: {}
+      - name: redis-tmp-conf
+        emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+        labels:
+          app: redis
+          release: RELEASE-NAME
+          heritage: Helm
+          component: slave
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: "8Gi"
+        
+        selector:
+  updateStrategy:
+    type: RollingUpdate
+---
+# Source: harness-poc/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: RELEASE-NAME
+  labels:    
+    app: harness-poc
+    release: RELEASE-NAME
+    type: producer
+  annotations:
+    kubernetes.io/ingress.class: nginx-internal    
+    stockx.io/helm-chart-name: 'harness-poc'
+    stockx.io/helm-release: 'RELEASE-NAME'
+    stockx.io/helm-revision: '1'
+    stockx.io/team: ''
+spec:
+  rules:
+  - host: harness-poc.dev1.stockx.net
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: RELEASE-NAME
+          servicePort: 80

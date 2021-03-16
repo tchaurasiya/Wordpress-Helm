@@ -1,0 +1,23 @@
+replicas: 5
+
+ingress:
+  domainName: harness-poc.production.stockx.net
+
+hpa:
+  enabled: true
+
+pdb:
+  enabled: true
+
+compute_resources:
+  enabled: true
+
+vault:
+  enabled: true
+  address: "https://vault.service.stark-production.stockx.io:8200"
+
+envConfig:
+  LOG_LEVEL: debug
+  ENVIRONMENT: "production"
+  NODE_ENV: production
+  EXPOSE_ERRORS: "true"
